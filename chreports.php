@@ -136,7 +136,7 @@ function chreports_civicrm_entityTypes(&$entityTypes) {
 
 function _getTableNameByName($name) {
    $values = civicrm_api3('CustomGroup', 'get', [
-     'name' => 'Contribution_Details',
+     'name' => $name,
      'sequential' => 1,
      'return' => ['table_name'],
    ])['values'];
@@ -158,6 +158,15 @@ function _getColumnNameByLabel($label) {
    }
 
    return NULL;
+}
+
+function _getOptionGroupNameByColumnName($columnName) {
+  return CRM_Core_DAO::singlevalueQuery("
+    SELECT g.name
+     FROM civicrm_option_group g
+      INNER JOIN civicrm_custom_field cf ON cf.option_group_id = g.id
+     WHERE cf.column_name = '$columnName'
+  ");
 }
 
 function chreports_civicrm_alterReportVar($varType, &$var, &$object) {
@@ -206,12 +215,19 @@ function chreports_civicrm_alterReportVar($varType, &$var, &$object) {
     }
   }
   elseif ($object instanceof CRM_Report_Form_Contribute_Summary || $object instanceof CRM_Chreports_Form_Report_ExtendSummary) {
+    $tablename = _getTableNameByName('Campaign_Information');
     if ($varType == 'columns') {
       if ($object instanceof CRM_Chreports_Form_Report_ExtendSummary) {
         unset($var['civicrm_contribution']['fields']['total_amount']['statistics']['avg']);
       }
       $var['civicrm_contribution']['fields']['total_amount']['statistics'] =  ['count' => ts('Number of Contributions'), 'sum' => ts('Total Amount')];
       $var['civicrm_contribution']['fields']['payment_instrument_id'] = ['title' => 'Payment Method'];
+      $var['civicrm_contribution']['filters']['payment_instrument_id'] = [
+        'title' => ts('Payment Method'),
+        'type' => CRM_Utils_Type::T_INT,
+        'operatorType' => CRM_Report_Form::OP_MULTISELECT,
+        'options' => CRM_Core_OptionGroup::values('payment_instrument'),
+      ];
       $var['civicrm_contact']['fields']['financial_account'] = ['title' => ts('Financial Account'), 'dbAlias' => 'temp.financial_account_name'];
       $var['civicrm_contact']['group_bys']['financial_account'] = ['title' => ts('Financial Account'), 'dbAlias' => 'temp.financial_account_name'];
       $var['civicrm_contact']['filters']['financial_account'] = [
@@ -221,6 +237,19 @@ function chreports_civicrm_alterReportVar($varType, &$var, &$object) {
         'options' => CRM_Contribute_PseudoConstant::financialAccount(),
         'dbAlias' => 'temp.fa_id',
       ];
+      if (!empty($tablename)) {
+        if ($columnName = _getColumnNameByLabel('CAMPAIGN TYPE')) {
+          $optionGroupName = _getOptionGroupNameByColumnName($columnName);
+          $var['civicrm_contribution']['filters']['campaign_type'] = [
+            'title' => ts('CAMPAIGN TYPE'),
+            'type' => CRM_Utils_Type::T_STRING,
+            'operatorType' => CRM_Report_Form::OP_MULTISELECT,
+            'options' => CRM_Core_OptionGroup::values($optionGroupName),
+            'dbAlias' => "ct.{$columnName}",
+          ];
+        }
+
+      }
       $var['civicrm_contribution']['group_bys']['campaign_id'] = ['title' => ts('Campaign')];
       $var['civicrm_contribution']['fields']['campaign_id'] = ['title' => ts('Campaign')];
       $var['civicrm_contribution']['group_bys']['payment_instrument_id'] = ['title' => ts('Payment Method')];
@@ -240,6 +269,13 @@ function chreports_civicrm_alterReportVar($varType, &$var, &$object) {
       GROUP BY li.id
       ) temp ON temp.contribution_id = contribution_civireport.id
        ";
+
+      $tablename = _getTableNameByName('Campaign_Information');
+      if (!empty($tableName)) {
+        $from .= "
+        LEFT JOIN $tableName ct ON ct.entity_id = contribution_civireport.contribution_page_id
+        ";
+      }
       $var->setVar('_from', $from);
     }
     if ($varType == 'rows') {
@@ -271,9 +307,6 @@ function chreports_civicrm_alterReportVar($varType, &$var, &$object) {
           elseif ($column == 'civicrm_contribution_contribution_page_id') {
             $entityTypes = CRM_Contribute_PseudoConstant::contributionPage();
             $entity = 'contribution_page_id';
-            foreach ($var as $rowNum => $row) {
-              $var[$rowNum]['civicrm_contribution_contribution_page_id'] = CRM_Utils_Array::value($row['civicrm_contribution_contribution_page_id'], $entityTypes);
-            }
           }
 
           $allTypes = array_flip(array_flip(array_filter(CRM_Utils_Array::collect($column, $var))));

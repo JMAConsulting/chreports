@@ -17,6 +17,25 @@ class CRM_Chreports_Form_Report_ExtendSummary extends CRM_Report_Form_Contribute
       ) temp ON temp.contribution_id = contribution_civireport.id
       ";
     }
+    $tablename = _getTableNameByName('Campaign_Information');
+    if (!empty($tableName)) {
+      $from .= "
+      LEFT JOIN $tableName ct ON ct.entity_id = contribution_civireport.contribution_page_id
+      ";
+    }
+  }
+
+  function _getTableNameByName($name) {
+     $values = civicrm_api3('CustomGroup', 'get', [
+       'name' => $name,
+       'sequential' => 1,
+       'return' => ['table_name'],
+     ])['values'];
+     if (!empty($values[0])) {
+       return CRM_Utils_Array::value('table_name', $values[0]);
+     }
+
+     return NULL;
   }
 
 }
